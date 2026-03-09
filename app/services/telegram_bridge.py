@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 from datetime import datetime
 from typing import Callable
@@ -18,6 +19,10 @@ class TelegramBridge:
         self.reply_store = ReplyStore()
         self.client_store = ClientStore()
         self._send_to_funpay: Callable[[int | str, str, str | None], object] | None = None
+        self._lock = threading.Lock()
+        self._dedupe: dict[tuple[int | str, str], float] = {}
+        self._last_forward_ts_by_chat: dict[int | str, float] = {}
+        self._recent_outgoing: dict[int | str, tuple[float, str]] = {}
 
         @self.bot.message_handler(func=lambda m: True, content_types=["text"])
         def on_text(message):
@@ -34,6 +39,32 @@ class TelegramBridge:
         author_id: int | None,
         text: str | None,
     ) -> None:
+        safe_text_plain = (text or "").strip()
+        if not safe_text_plain:
+            return
+        if not self._should_forward_client_text(safe_text_plain):
+            return
+        if self.was_recent_outgoing_message(chat_id, safe_text_plain):
+            return
+
+        now_ts = time.time()
+        key = (chat_id, safe_text_plain)
+        with self._lock:
+            if now_ts - self._dedupe.get(key, 0.0) < 30.0:
+                return
+            if now_ts - self._last_forward_ts_by_chat.get(chat_id, 0.0) < 2.5:
+                return
+            self._dedupe[key] = now_ts
+            self._last_forward_ts_by_chat[chat_id] = now_ts
+
+            # Cleanup stale anti-spam entries.
+            stale_dedupe = [k for k, ts in self._dedupe.items() if now_ts - ts > 300.0]
+            for k in stale_dedupe:
+                self._dedupe.pop(k, None)
+            stale_chat = [cid for cid, ts in self._last_forward_ts_by_chat.items() if now_ts - ts > 300.0]
+            for cid in stale_chat:
+                self._last_forward_ts_by_chat.pop(cid, None)
+
         ctx = self.client_store.upsert(chat_id, chat_name, author, author_id, text)
 
         created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -57,6 +88,24 @@ class TelegramBridge:
             sent.message_id,
             PendingReply(chat_id=chat_id, chat_name=chat_name, client_code=ctx.code),
         )
+
+    @staticmethod
+    def _should_forward_client_text(text: str) -> bool:
+        normalized = (text or "").strip()
+        lower = normalized.lower()
+        if not normalized:
+            return False
+        if lower.startswith("/"):
+            return False
+
+        blocked_prefixes = (
+            "ваши активные аренды:",
+            "коды steam guard:",
+            "нет активных аренд для получения steam guard",
+            "у вас сейчас нет активных аренд",
+            "продавец вызван",
+        )
+        return not lower.startswith(blocked_prefixes)
 
     def _handle_text(self, message) -> None:
         if message.chat.id != self.admin_chat_id:
@@ -126,9 +175,24 @@ class TelegramBridge:
 
         response = self._send_to_funpay(chat_id, text, chat_name)
         if response:
+            self.note_outgoing_message(chat_id, text)
             self.bot.reply_to(message, f"Sent to FunPay ({client_code}).")
         else:
             self.bot.reply_to(message, f"Failed to send to FunPay ({client_code}).")
+
+    def note_outgoing_message(self, chat_id: int | str, text: str) -> None:
+        with self._lock:
+            self._recent_outgoing[chat_id] = (time.time(), (text or "").strip())
+
+    def was_recent_outgoing_message(self, chat_id: int | str, text: str, window_seconds: float = 20.0) -> bool:
+        with self._lock:
+            cached = self._recent_outgoing.get(chat_id)
+        if not cached:
+            return False
+        ts, cached_text = cached
+        if time.time() - ts > window_seconds:
+            return False
+        return cached_text == (text or "").strip()
 
     def _send_help(self, message) -> None:
         text = (
