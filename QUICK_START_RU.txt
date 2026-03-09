@@ -1,0 +1,19 @@
+SamSeller Support - Быстрый старт (Windows)
+
+1) Распакуйте архив в любую папку.
+2) Запустите SamSeller-Support.exe.
+3) При первом запуске введите:
+   - Golden Key FunPay
+   - Token Telegram бота
+   - Telegram Admin ID
+4) После сохранения настроек бот начнет работу.
+
+Важно:
+- Файл secrets.local.json создается рядом с .exe.
+- Никому не передавайте secrets.local.json.
+- Управление ботом доступно только Admin ID.
+
+Команды в Telegram:
+- /help
+- /clients
+- /to C001 ваш текст
