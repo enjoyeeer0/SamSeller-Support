@@ -8,18 +8,31 @@ from app.services.telegram_bridge import TelegramBridge
 
 class FunPayListener:
     def __init__(self, golden_key: str, tg_bridge: TelegramBridge) -> None:
-        self.account = Account(golden_key).get()
+        self.account = Account(golden_key, requests_timeout=25).get()
         # Safe mode: avoid internal bulk history fetches that may fail on some chats.
         self.runner = Runner(self.account, disable_message_requests=True)
         self.tg = tg_bridge
         self._last_seen_text: dict[int, str] = {}
 
     def send_message(self, chat_id: int | str, text: str, chat_name: str | None):
-        try:
-            return self.account.send_message(chat_id=chat_id, text=text, chat_name=chat_name)
-        except Exception:
-            logging.exception("Не удалось отправить сообщение в чат FunPay %s", chat_id)
-            return None
+        for attempt in range(1, 4):
+            try:
+                return self.account.send_message(chat_id=chat_id, text=text, chat_name=chat_name)
+            except Exception as exc:
+                logging.warning(
+                    "Попытка %s/3: не удалось отправить сообщение в чат FunPay %s: %s",
+                    attempt,
+                    chat_id,
+                    exc,
+                )
+                try:
+                    # Refresh session before next attempt.
+                    self.account.get(update_phpsessid=True)
+                except Exception:
+                    pass
+                time.sleep(1.0 * attempt)
+        logging.error("Не удалось отправить сообщение в чат FunPay %s после 3 попыток", chat_id)
+        return None
 
     def run_forever(self) -> None:
         while True:

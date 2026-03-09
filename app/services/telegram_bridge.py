@@ -84,18 +84,14 @@ class TelegramBridge:
 
         ctx = self.client_store.upsert(chat_id, chat_name, author, author_id, text)
 
-        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        safe_text = escape_html(text, fallback="[empty or non-text message]")
+        created_at = datetime.now().strftime("%d.%m %H:%M:%S")
+        safe_text = escape_html(self._limit_text(text), fallback="[пусто]")
         safe_author = escape_html(author)
-        safe_chat = escape_html(chat_name)
 
         payload = (
-            "<b>New FunPay message</b>\n"
-            f"Client code: <code>{ctx.code}</code>\n"
-            f"Time: <code>{created_at}</code>\n"
-            f"Client: <b>{safe_author}</b>\n"
-            f"Client ID: <code>{author_id if author_id is not None else 'unknown'}</code>\n"
-            f"Chat: <code>{safe_chat}</code>\n"
+            f"Код: <code>{ctx.code}</code>\n"
+            f"Ник: <b>{safe_author}</b>\n"
+            f"Дата: <code>{created_at}</code>\n"
             f"Chat ID: <code>{chat_id}</code>\n\n"
             f"<code>{safe_text}</code>"
         )
@@ -125,6 +121,15 @@ class TelegramBridge:
             "продавец вызван",
         )
         return not lower.startswith(blocked_prefixes)
+
+    @staticmethod
+    def _limit_text(text: str | None, limit: int = 600) -> str | None:
+        if text is None:
+            return None
+        normalized = "\n".join(line.rstrip() for line in str(text).splitlines()).strip()
+        if len(normalized) <= limit:
+            return normalized
+        return normalized[: limit - 3] + "..."
 
     def _handle_text(self, message) -> None:
         if message.chat.id != self.admin_chat_id:
@@ -198,9 +203,9 @@ class TelegramBridge:
         response = self._send_to_funpay(chat_id, text, chat_name)
         if response:
             self.note_outgoing_message(chat_id, text)
-            self.bot.reply_to(message, f"Отправлено в FunPay ({client_code}).")
+            self.bot.reply_to(message, "✅ Доставлено")
         else:
-            self.bot.reply_to(message, f"Ошибка отправки в FunPay ({client_code}).")
+            self.bot.reply_to(message, "❌ Ошибка доставки")
 
     def note_outgoing_message(self, chat_id: int | str, text: str) -> None:
         with self._lock:
