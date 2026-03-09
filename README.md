@@ -38,40 +38,6 @@
 - `/dialog off` - выключить диалог-режим.
 - `/to C001 ваш текст` - отправить сообщение клиенту по коду.
 
-## Конфигурация
-
-Бот читает настройки в таком порядке:
-
-1. Переменные окружения.
-2. Файл `secrets.local.json`.
-3. Интерактивный мастер первого запуска.
-
-### Переменные окружения
-
-- `FUNPAY_GOLDEN_KEY`
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_ADMIN_IDS` (список 1-3 ID: через запятую/пробел/`;`)
-
-Пример:
-
-```env
-FUNPAY_GOLDEN_KEY=your_golden_key
-TELEGRAM_BOT_TOKEN=123456:ABCDEF...
-TELEGRAM_ADMIN_IDS=111111111,222222222,333333333
-```
-
-### secrets.local.json
-
-Поддерживаемый формат:
-
-```json
-{
-	"FUNPAY_GOLDEN_KEY": "paste-your-golden-key",
-	"TELEGRAM_BOT_TOKEN": "paste-your-telegram-bot-token",
-	"TELEGRAM_ADMIN_IDS": [111111111, 222222222]
-}
-```
-
 Для обратной совместимости также поддерживается старый ключ `TELEGRAM_ADMIN_ID`.
 
 ## Быстрый старт (Windows release)
@@ -84,15 +50,6 @@ TELEGRAM_ADMIN_IDS=111111111,222222222,333333333
 	 - Telegram Bot Token;
 	 - 1-3 Telegram Admin ID.
 5. Дождитесь сообщения о запуске моста в логах.
-
-## Запуск из исходников
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\activate
-pip install -r requirements.txt
-python Main.py
-```
 
 ## Логи
 
@@ -120,7 +77,6 @@ python Main.py
 
 - Не публикуйте `secrets.local.json`.
 - Не передавайте токен Telegram и Golden Key третьим лицам.
-- Для production рекомендуется запуск под отдельным пользователем ОС с ограниченными правами.
 
 ## Структура проекта
 
@@ -131,7 +87,3 @@ python Main.py
 - `app/stores/client_store.py` - клиенты, история, unanswered.
 - `app/stores/reply_store.py` - привязка Telegram reply к чатам FunPay.
 - `app/logging_setup.py` - конфигурация логирования.
-
-## Лицензия
-
-См. файл `LICENSE`.
