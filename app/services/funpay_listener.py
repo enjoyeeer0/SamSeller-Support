@@ -1,5 +1,6 @@
 import logging
 import time
+from typing import Any
 
 from FunPayAPI import Account, Runner, events
 
@@ -14,11 +15,56 @@ class FunPayListener:
         self.tg = tg_bridge
         self._last_seen_text: dict[int, str] = {}
 
+    def _get_latest_chat_message(self, chat_id: int | str, chat_name: str | None) -> Any | None:
+        """Returns the latest message object for the chat or None if unavailable."""
+        try:
+            history = self.account.get_chat_history(chat_id=chat_id, interlocutor_username=chat_name)
+        except Exception:
+            return None
+        if not history:
+            return None
+        return history[-1]
+
+    def _was_last_message_delivered(
+        self,
+        chat_id: int | str,
+        text: str,
+        chat_name: str | None,
+        baseline_last_message_id: int | None,
+    ) -> bool:
+        """Checks whether the most recent chat message is our just-sent text."""
+        last_message = self._get_latest_chat_message(chat_id, chat_name)
+        if last_message is None:
+            return False
+
+        last_id = getattr(last_message, "id", None)
+        if baseline_last_message_id is not None and isinstance(last_id, int):
+            if last_id <= baseline_last_message_id:
+                return False
+
+        last_text = (getattr(last_message, "text", "") or "").strip()
+        if last_text != (text or "").strip():
+            return False
+
+        return getattr(last_message, "author_id", None) == self.account.id
+
     def send_message(self, chat_id: int | str, text: str, chat_name: str | None):
+        baseline_last_message_id = None
+        baseline_message = self._get_latest_chat_message(chat_id, chat_name)
+        if baseline_message is not None:
+            baseline_last_message_id = getattr(baseline_message, "id", None)
+
         for attempt in range(1, 4):
             try:
                 return self.account.send_message(chat_id=chat_id, text=text, chat_name=chat_name)
             except Exception as exc:
+                if self._was_last_message_delivered(chat_id, text, chat_name, baseline_last_message_id):
+                    logging.warning(
+                        "Отправка в чат FunPay %s с ошибкой '%s', но сообщение уже доставлено. Повтор не нужен.",
+                        chat_id,
+                        exc,
+                    )
+                    return True
                 logging.warning(
                     "Попытка %s/3: не удалось отправить сообщение в чат FunPay %s: %s",
                     attempt,
