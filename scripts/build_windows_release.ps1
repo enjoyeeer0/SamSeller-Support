@@ -11,8 +11,10 @@ pyinstaller --noconfirm --clean --onefile --console --name "SamSeller-Support" M
 Write-Host "[3/4] Preparing release bundle"
 if (Test-Path "release") { Remove-Item -Recurse -Force "release" }
 New-Item -ItemType Directory -Force -Path release | Out-Null
+New-Item -ItemType Directory -Force -Path "release/logs" | Out-Null
 
 Copy-Item "dist/SamSeller-Support.exe" "release/SamSeller-Support.exe"
+if (Test-Path "logs/README.txt") { Copy-Item "logs/README.txt" "release/logs/README.txt" }
 
 Write-Host "[4/4] Archiving"
 Compress-Archive -Path release/* -DestinationPath "SamSeller-Support-windows-x64.zip" -Force
