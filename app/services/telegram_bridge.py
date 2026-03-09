@@ -23,6 +23,17 @@ class TelegramBridge:
         self._dedupe: dict[tuple[int | str, str], float] = {}
         self._last_forward_ts_by_chat: dict[int | str, float] = {}
         self._recent_outgoing: dict[int | str, tuple[float, str]] = {}
+        self._forwarded_count = 0
+        self._suppressed_duplicate_count = 0
+        self._suppressed_chat_cooldown_count = 0
+        self._suppressed_recent_outgoing_count = 0
+        self._suppressed_filtered_count = 0
+
+        self._listener_healthy = True
+        self._listener_last_error: str | None = None
+        self._listener_last_error_ts: float | None = None
+        self._listener_last_recovered_ts: float | None = None
+        self._health_ping_interval_seconds = 15 * 60
 
         @self.bot.message_handler(func=lambda m: True, content_types=["text"])
         def on_text(message):
@@ -43,16 +54,22 @@ class TelegramBridge:
         if not safe_text_plain:
             return
         if not self._should_forward_client_text(safe_text_plain):
+            with self._lock:
+                self._suppressed_filtered_count += 1
             return
         if self.was_recent_outgoing_message(chat_id, safe_text_plain):
+            with self._lock:
+                self._suppressed_recent_outgoing_count += 1
             return
 
         now_ts = time.time()
         key = (chat_id, safe_text_plain)
         with self._lock:
             if now_ts - self._dedupe.get(key, 0.0) < 30.0:
+                self._suppressed_duplicate_count += 1
                 return
             if now_ts - self._last_forward_ts_by_chat.get(chat_id, 0.0) < 2.5:
+                self._suppressed_chat_cooldown_count += 1
                 return
             self._dedupe[key] = now_ts
             self._last_forward_ts_by_chat[chat_id] = now_ts
@@ -88,6 +105,8 @@ class TelegramBridge:
             sent.message_id,
             PendingReply(chat_id=chat_id, chat_name=chat_name, client_code=ctx.code),
         )
+        with self._lock:
+            self._forwarded_count += 1
 
     @staticmethod
     def _should_forward_client_text(text: str) -> bool:
@@ -116,6 +135,9 @@ class TelegramBridge:
         if text == "/help":
             self._send_help(message)
             return
+        if text == "/status":
+            self._send_status(message)
+            return
         if text == "/clients":
             self._send_clients(message)
             return
@@ -126,13 +148,13 @@ class TelegramBridge:
         if not message.reply_to_message:
             self.bot.reply_to(
                 message,
-                "Reply to a notification, or use /clients and /to CODE your message.",
+                "Ответьте реплаем на уведомление или используйте /clients и /to КОД ваш_текст.",
             )
             return
 
         link = self.reply_store.get(message.reply_to_message.message_id)
         if not link:
-            self.bot.reply_to(message, "Cannot find linked FunPay chat for this reply.")
+            self.bot.reply_to(message, "Не удалось найти связанный чат FunPay для этого реплая.")
             return
 
         self._send_to_funpay_message(message, link.chat_id, link.chat_name, link.client_code)
@@ -140,18 +162,18 @@ class TelegramBridge:
     def _handle_send_to_code(self, message, full_text: str) -> None:
         parts = full_text.split(maxsplit=2)
         if len(parts) < 3:
-            self.bot.reply_to(message, "Usage: /to C001 your message")
+            self.bot.reply_to(message, "Формат: /to C001 ваш_текст")
             return
 
         code = parts[1].upper()
         user_text = parts[2].strip()
         if not user_text:
-            self.bot.reply_to(message, "Message cannot be empty.")
+            self.bot.reply_to(message, "Текст сообщения не может быть пустым.")
             return
 
         ctx = self.client_store.get_by_code(code)
         if not ctx:
-            self.bot.reply_to(message, f"Client code {code} not found. Use /clients.")
+            self.bot.reply_to(message, f"Код клиента {code} не найден. Используйте /clients.")
             return
 
         self._send_to_funpay_message(message, ctx.chat_id, ctx.chat_name, ctx.code, user_text)
@@ -165,20 +187,20 @@ class TelegramBridge:
         override_text: str | None = None,
     ) -> None:
         if self._send_to_funpay is None:
-            self.bot.reply_to(message, "FunPay sender is not initialized.")
+            self.bot.reply_to(message, "Модуль отправки в FunPay не инициализирован.")
             return
 
         text = (override_text if override_text is not None else (message.text or "")).strip()
         if not text:
-            self.bot.reply_to(message, "Cannot send empty message.")
+            self.bot.reply_to(message, "Нельзя отправить пустое сообщение.")
             return
 
         response = self._send_to_funpay(chat_id, text, chat_name)
         if response:
             self.note_outgoing_message(chat_id, text)
-            self.bot.reply_to(message, f"Sent to FunPay ({client_code}).")
+            self.bot.reply_to(message, f"Отправлено в FunPay ({client_code}).")
         else:
-            self.bot.reply_to(message, f"Failed to send to FunPay ({client_code}).")
+            self.bot.reply_to(message, f"Ошибка отправки в FunPay ({client_code}).")
 
     def note_outgoing_message(self, chat_id: int | str, text: str) -> None:
         with self._lock:
@@ -196,21 +218,26 @@ class TelegramBridge:
 
     def _send_help(self, message) -> None:
         text = (
-            "Commands:\n"
-            "<code>/help</code> - show help\n"
-            "<code>/clients</code> - list recent clients with short codes\n"
-            "<code>/to C001 your text</code> - send message to client by code\n\n"
-            "You can also reply directly to a notification message."
+            "Команды:\n"
+            "<code>/help</code> - помощь\n"
+            "<code>/status</code> - состояние бота\n"
+            "<code>/clients</code> - список последних клиентов\n"
+            "<code>/to C001 ваш_текст</code> - отправка по коду клиента\n\n"
+            "Также можно отвечать реплаем на уведомление."
         )
         self.bot.reply_to(message, text)
+
+    def _send_status(self, message) -> None:
+        status_text = self._build_status_text()
+        self.bot.reply_to(message, status_text)
 
     def _send_clients(self, message) -> None:
         clients = self.client_store.list_clients(limit=20)
         if not clients:
-            self.bot.reply_to(message, "No clients yet.")
+            self.bot.reply_to(message, "Пока нет клиентов.")
             return
 
-        lines = ["<b>Recent clients</b>"]
+        lines = ["<b>Последние клиенты</b>"]
         for client in clients:
             when = client.last_message_at.strftime("%H:%M:%S")
             author = escape_html(client.author)
@@ -221,10 +248,64 @@ class TelegramBridge:
 
         self.bot.reply_to(message, "\n".join(lines))
 
+    def report_listener_error(self, error_text: str) -> None:
+        now = time.time()
+        with self._lock:
+            self._listener_healthy = False
+            self._listener_last_error = error_text.strip() or "Неизвестная ошибка"
+            self._listener_last_error_ts = now
+
+    def report_listener_recovered(self) -> None:
+        now = time.time()
+        with self._lock:
+            was_unhealthy = not self._listener_healthy
+            self._listener_healthy = True
+            self._listener_last_recovered_ts = now
+        if was_unhealthy:
+            self._send_text_to_admin("✅ Listener восстановлен после ошибки.")
+
+    def _build_status_text(self) -> str:
+        with self._lock:
+            listener_healthy = self._listener_healthy
+            last_error = self._listener_last_error
+            last_error_ts = self._listener_last_error_ts
+            last_recovered_ts = self._listener_last_recovered_ts
+            forwarded = self._forwarded_count
+            suppressed_duplicate = self._suppressed_duplicate_count
+            suppressed_chat_cooldown = self._suppressed_chat_cooldown_count
+            suppressed_recent_outgoing = self._suppressed_recent_outgoing_count
+            suppressed_filtered = self._suppressed_filtered_count
+
+        def fmt_ts(value: float | None) -> str:
+            if value is None:
+                return "-"
+            return datetime.fromtimestamp(value).strftime("%Y-%m-%d %H:%M:%S")
+
+        listener_state = "OK" if listener_healthy else "ОШИБКА"
+        text = (
+            "📊 Статус\n"
+            f"Слушатель: <b>{listener_state}</b>\n"
+            f"Последняя ошибка: <code>{escape_html(last_error, fallback='-')}</code>\n"
+            f"Время ошибки: <code>{fmt_ts(last_error_ts)}</code>\n"
+            f"Время восстановления: <code>{fmt_ts(last_recovered_ts)}</code>\n\n"
+            f"Форвардов в Telegram: <code>{forwarded}</code>\n"
+            f"Подавлено дублей: <code>{suppressed_duplicate}</code>\n"
+            f"Подавлено flood cooldown: <code>{suppressed_chat_cooldown}</code>\n"
+            f"Подавлено как эхо исходящих: <code>{suppressed_recent_outgoing}</code>\n"
+            f"Подавлено фильтрами: <code>{suppressed_filtered}</code>"
+        )
+        return text
+
+    def run_health_ping_forever(self) -> None:
+        while True:
+            time.sleep(self._health_ping_interval_seconds)
+            status = self._build_status_text()
+            self._send_text_to_admin(f"💓 Пинг здоровья\n\n{status}")
+
     def run_polling_forever(self) -> None:
         while True:
             try:
                 self.bot.infinity_polling(timeout=30, long_polling_timeout=30)
             except Exception:
-                logging.exception("Telegram polling crashed. Restarting in 3 seconds.")
+                logging.exception("Ошибка polling Telegram. Перезапуск через 3 секунды.")
                 time.sleep(3)

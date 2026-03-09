@@ -31,33 +31,33 @@ def _try_get_from_file() -> tuple[str, str, int] | None:
 
 def _prompt_admin_id() -> int:
     while True:
-        value = input("Enter Telegram Admin ID: ").strip()
+        value = input("Введите Telegram Admin ID: ").strip()
         if not value.isdigit():
-            print("Admin ID must be a number.")
+            print("Admin ID должен быть числом.")
             continue
         admin_id = int(value)
         if admin_id <= 0:
-            print("Admin ID must be > 0.")
+            print("Admin ID должен быть больше 0.")
             continue
         return admin_id
 
 
 def _run_setup_wizard() -> tuple[str, str, int]:
-    print("First run setup")
-    print("Enter your credentials. They will be saved to secrets.local.json")
-    print("Tip: you can paste with Ctrl+V.")
+    print("Первичная настройка")
+    print("Введите данные. Они будут сохранены в secrets.local.json")
+    print("Подсказка: вставка через Ctrl+V.")
 
     while True:
-        golden_key = input("Enter FunPay Golden Key: ").strip()
+        golden_key = input("Введите FunPay Golden Key: ").strip()
         if len(golden_key) < 16:
-            print("Golden Key looks too short. Try again.")
+            print("Golden Key выглядит слишком коротким. Попробуйте снова.")
             continue
         break
 
     while True:
-        telegram_token = input("Enter Telegram Bot Token: ").strip()
+        telegram_token = input("Введите Telegram Bot Token: ").strip()
         if len(telegram_token) < 20 or ":" not in telegram_token:
-            print("Token format looks invalid. Try again.")
+            print("Неверный формат токена. Попробуйте снова.")
             continue
         break
 
@@ -69,7 +69,7 @@ def _run_setup_wizard() -> tuple[str, str, int]:
         "TELEGRAM_ADMIN_ID": admin_id,
     }
     SECRETS_FILE.write_text(json.dumps(data, ensure_ascii=True, indent=2), encoding="utf-8")
-    print("Saved local settings to secrets.local.json")
+    print("Локальные настройки сохранены в secrets.local.json")
     return golden_key, telegram_token, admin_id
 
 

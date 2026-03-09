@@ -21,7 +21,10 @@ def main() -> None:
     tg_thread = threading.Thread(target=tg_bridge.run_polling_forever, daemon=True)
     tg_thread.start()
 
-    logging.info("Bridge started. Listening FunPay and Telegram...")
+    tg_health_thread = threading.Thread(target=tg_bridge.run_health_ping_forever, daemon=True)
+    tg_health_thread.start()
+
+    logging.info("Мост запущен. Слушаю FunPay и Telegram...")
     fp.run_forever()
 
 
