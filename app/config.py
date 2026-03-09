@@ -1,4 +1,3 @@
-import getpass
 import json
 import os
 from pathlib import Path
@@ -46,16 +45,17 @@ def _prompt_admin_id() -> int:
 def _run_setup_wizard() -> tuple[str, str, int]:
     print("First run setup")
     print("Enter your credentials. They will be saved to secrets.local.json")
+    print("Tip: you can paste with Ctrl+V.")
 
     while True:
-        golden_key = getpass.getpass("Enter FunPay Golden Key: ").strip()
+        golden_key = input("Enter FunPay Golden Key: ").strip()
         if len(golden_key) < 16:
             print("Golden Key looks too short. Try again.")
             continue
         break
 
     while True:
-        telegram_token = getpass.getpass("Enter Telegram Bot Token: ").strip()
+        telegram_token = input("Enter Telegram Bot Token: ").strip()
         if len(telegram_token) < 20 or ":" not in telegram_token:
             print("Token format looks invalid. Try again.")
             continue
